@@ -287,19 +287,20 @@ def palabras_target(ruta):
 
 
 # función para calcular a similutde do coseno
-def calcular_cosine(words, word_index, embeddings_despois, titulo):
+def calcular_cosine(words, word_index, embeddings, titulo):
     # Iniciarlizar diccionario vacío
     word_proximities = {}
 
     for word in words:
         index = word_index[word]
-        embedding = embeddings_despois[index]
+        embedding = embeddings[index]
 
-        similarity = cosine_similarity([embedding], embeddings_despois)[0].tolist()
+        similarity = cosine_similarity([embedding], embeddings)[0].tolist()
 
-        # Buscar os 10 resultados máis altos(máis similares)
-        indices = np.argsort(similarity)[-1:-11:-1]
-        indices = [x - 1 for x in indices]
+        # Obtener índices de top-10 sin incluir la palabra objetivo
+        indices = np.argsort(similarity)[::-1]  # orden descendente
+        indices = [i for i in indices if i != index][:10]  # excluye la palabra original
+
 
         # Recuperar cales son as palabras máis próximas(nas liñas anteriores o que se recuperan son os índices)
         palabras_proximas = [list(word_index.keys())[i] for i in indices]
@@ -317,9 +318,10 @@ def calcular_cosine(words, word_index, embeddings_despois, titulo):
     print(table)
 
 
+
 # Producto cartesiano(da palabra obxectivo co resto)
 def cartesian_product(sequences):
-    n = 5 // 2
+    n = 2
     input_pairs = []
     output = []
     for i in range(n, len(sequences) - n):

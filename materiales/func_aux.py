@@ -35,7 +35,7 @@ carga_tokenizador("materiales/target_words_game_of_thrones.txt")
 
 
 
-def crear_ventana(secuencias, window_size):
+def crear_ventana(secuencia, window_size):
     """
     Esta función crea las ventanas de contexto a partir de las secuencias de palabras.
     """
@@ -43,8 +43,8 @@ def crear_ventana(secuencias, window_size):
     #y a la derecha
     inputs = [] # lista para almacenar las palabras de entrada, es decir las palabras de contexto (las palabras vecinas)
     outputs = [] # lista para almacenar las palabras de salida, es decir la palabra objetivo
-    for i in range(window_size, len(secuencias) - window_size):
-        context = secuencias[i-window_size:i] + secuencias[i+1 : i+1+window_size] # palabras antes de la palabra objetivo + palabras
+    for i in range(window_size, len(secuencia) - window_size):
+        context = secuencia[i-window_size:i] + secuencia[i+1 : i+1+window_size] # palabras antes de la palabra objetivo + palabras
         #después de la palabra objetivo
         target = secuencias[i] # palabra objetivo
         inputs.append(context)
@@ -61,7 +61,7 @@ def crear_ventana(secuencias, window_size):
 #y más legible, ya que no necesitamos crear un modelo funcional con entradas y salidas separadas. Sino que un modelo secuencial
 def crear_modelo_I(neurons, vocab_size, embedding_size, window_size):
     """
-    Esta función crea el modelo I (Skip-gram) para predecir la palabra objetivo a partir del contexto.
+    Esta función crea el modelo I para predecir la palabra objetivo a partir del contexto.
     neurons - número de neuronas en la capa oculta
     vocab_size - tamaño del vocabulario (número de palabras únicas)
     embedding_size - tamaño del vector de embedding
@@ -87,7 +87,7 @@ def crear_modelo_I(neurons, vocab_size, embedding_size, window_size):
 # en el conjunto de validación. 
 def comprobar_modelo_I(secuencias, vocab_size, window_size, neurons, embedding_size ):
     """
-    Esta función entrena el modelo I (Skip-gram) y devuelve la precisión en el conjunto de validación. Posteriormente almacena y ordena
+    Esta función entrena el modelo I y devuelve la precisión en el conjunto de validación. Posteriormente almacena y ordena
     los resultados y devuelve la mejor configuración de hiperparámetros.
 
     secuencias - secuencias de palabras tokenizadas (lista de enteros)
@@ -131,7 +131,7 @@ def comprobar_modelo_I(secuencias, vocab_size, window_size, neurons, embedding_s
     print(tabla)
     #devolver la mejor configuración de hiperparámetros
     mejor_configuracion = results[0]
-    print(f"\nMejor configuración: {mejor_configuracion}. Precisión en el conjunto de validación: {mejor_configuracion['val_accuracy']}")
+    print(f"\nMejor configuración: {mejor_configuracion}.")
     return mejor_configuracion
 
 
@@ -172,3 +172,159 @@ def visualize_tsne_embeddings(words, embeddings, word_index, filename=None):
         plt.savefig(filename)
     else:
         plt.show()
+
+
+
+def visualize_all_tsne_embeddings(embeddings, word_index, words_to_plot, words_to_label=None, filename=None):
+    """
+    Visualizes t-SNE embeddings of selected words with optional labeling.
+
+    Args:
+        embeddings (numpy.ndarray): Array containing word embeddings.
+        word_index (dict): Mapping of words to their indices in the embeddings array.
+        words_to_plot (list): List of words to plot.
+        words_to_label (list, optional): List of words to label. Defaults to None.
+        filename (str, optional): File to save the visualization. If None, plot is displayed.
+
+    Returns:
+        None
+    """
+    # Create a reverse mapping from index to word
+    index_word = {index: word for word, index in word_index.items()}
+
+    # Ensure words_to_label is a subset of words_to_plot
+    if words_to_label is None:
+        words_to_label = words_to_plot
+    words_to_label = set(words_to_label).intersection(words_to_plot)
+
+    # Filter the embeddings for the words to plot
+    indices_to_plot = [word_index[word] for word in words_to_plot if word in word_index]
+    selected_embeddings = embeddings[indices_to_plot]
+
+    # Set perplexity for t-SNE, it's recommended to use a value less than the number of selected words
+    perplexity = min(5,len(words_to_plot) - 1)
+
+    # Use t-SNE to reduce dimensionality
+    tsne = TSNE(n_components=2, perplexity=perplexity, random_state=0)
+    reduced_embeddings = tsne.fit_transform(selected_embeddings)
+
+    # Plotting
+    plt.figure(figsize=(12, 12))
+    for i, index in enumerate(indices_to_plot):
+        plt.scatter(reduced_embeddings[i, 0], reduced_embeddings[i, 1], alpha=0.5)
+        if index_word[index] in words_to_label:  # Annotate only selected words
+            plt.annotate(index_word[index],
+                         xy=(reduced_embeddings[i, 0], reduced_embeddings[i, 1]),
+                         xytext=(5, 2),
+                         textcoords='offset points',
+                         ha='right',
+                         va='bottom')
+
+
+# Función para cargar las palabras target
+def palabras_target(ruta):
+    with open(ruta, "r") as file:
+        # Leer el archivo
+        words = file.readlines()
+
+    # Borrar espacios
+    words = [word.strip() for word in words]
+
+    return words
+
+
+# Función para calcular la similitud del coseno entre embeddings de palabras
+def calcular_similitud_coseno(words, word_index, embeddings, titulo):
+
+    # Diccionario donde se guardarán las palabras más similares a cada palabra objetivo
+    word_proximities = {}
+
+    # Iterar por cada palabra objetivo
+    for word in words:
+        # Obtener el índice de la palabra en el vocabulario
+        index = word_index[word]
+        # Obtener su vector embedding
+        embedding = embeddings[index]
+
+        # Calcular la similitud del coseno entre el embedding de la palabra y todos los embeddings
+        similarity = cosine_similarity([embedding], embeddings)[0].tolist()
+
+        # Obtener los índices ordenados de mayor a menor similitud
+        indices = np.argsort(similarity)[::-1]
+        # Eliminar el índice de la palabra original y quedarse con los 10 más similares
+        indices = [i for i in indices if i != index][:10]
+
+        # Obtener las palabras correspondientes a esos índices
+        palabras_proximas = [list(word_index.keys())[i] for i in indices]
+
+        # Guardar las palabras más próximas en el diccionario
+        word_proximities[word] = palabras_proximas
+
+    # Crear tabla con los resultados
+    table = PrettyTable()
+    table.field_names = ['Target', 'Palabras máis próximas ' + titulo]
+
+    # Añadir filas a la tabla
+    for word, nearby_words in word_proximities.items():
+        table.add_row([word, ', '.join(nearby_words)])
+
+    # Mostrar la tabla
+    print(table)
+
+
+
+
+
+
+
+
+
+###MAÑANA REVISAR CARTESIAN_PRODUCT Y METER CREAR_MODELO_2 Y YA PONERNOS CON EL IPYNB
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Función que genera pares (target, contexto) positivos y negativos para entrenamiento 
+def cartesian_product(sequences):
+    # Tamaño de la ventana de contexto: 5 // 2 = 2 (contexto a izquierda y derecha)
+    n = 2
+
+    # Listas donde se almacenarán los pares de entrada y sus etiquetas
+    input_pairs = []
+    output = []
+
+    # Iterar por cada palabra con suficiente contexto a izquierda y derecha
+    for i in range(n, len(sequences) - n):
+        # Obtener las palabras del contexto (ventana a izquierda y derecha, excluyendo la palabra central)
+        context = sequences[i - n:i] + sequences[i + 1:i + n + 1]
+        # Palabra objetivo (central en la ventana)
+        target_word = sequences[i]
+
+        # Para cada palabra del contexto, crear un par positivo con la palabra objetivo
+        for word in context:
+            input_pairs.append([target_word, word])  # Par (target, contexto)
+            output.append(1)  # Etiqueta positiva
+
+        # Generar un ejemplo negativo: una palabra aleatoria que no está en el contexto
+        random_number = random.randint(0, len(sequences) - 1)
+        while random_number in context:
+            random_number = random.randint(0, len(sequences) - 1)
+
+        # Añadir el par negativo (target, palabra_aleatoria)
+        input_pairs.append([target_word, random_number])
+        output.append(0)  # Etiqueta negativa
+
+    # Convertir las listas a arrays de NumPy y devolverlas
+    return np.array(input_pairs), np.array(output)
