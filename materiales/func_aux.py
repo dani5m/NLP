@@ -1,7 +1,6 @@
 #Código complementario a la práctica. Conjunto de funciones auxiliares que necesitaremos
 from tensorflow.keras.preprocessing.text import Tokenizer
 from prettytable import PrettyTable
-from tqdm import tqdm
 from sklearn.manifold import TSNE
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
@@ -25,13 +24,16 @@ def carga_tokenizador(file_path):
     #crear las secuencias y el diccionario
     secuencias = tokenizador.texts_to_sequences([text])[0]
     word_index = tokenizador.word_index
-    vocabulario_tamaño = len(word_index)
+    vocabulario_tamaño = len(word_index) + 1
 
-    print(secuencias, word_index, vocabulario_tamaño)
+    # le sumamos uno al len(word_index) para evitar errores más tarde, por qué? porque el tokenizador para el word_index si tienes por ejemplo
+    # 2024 palabras diferentes te devuelve un diccionario de 1 a 2024. Entonces, en la capa embedding (que tendrá tantas filas como vocabulario_tamaño)
+    # y entendiendo que esta capa asocia a cada token un vector (word2vec), entonces si el word_index es 2024 y yo no sumo + 1 entonces el 
+    # vocab_size que le pase tambien será 2024 y la matriz irá de 0 a 2023 y cuando separe las secuencias en ventanas y me aparezca el tóken
+    # 2024 no lo va a encontrar en la capa embedding y me dará un error de index. En cambio si sumo +1 al tamaño del vocabulario, entonces
+    # la matriz irá de 0 a 2024 y el word_index irá de 1 a 2024, y no habrá problemas de indexación para ningún token.
+    return tokenizador, secuencias, word_index, vocabulario_tamaño
 
-    return secuencias, word_index, vocabulario_tamaño
-
-carga_tokenizador("materiales/target_words_game_of_thrones.txt")
 
 
 
@@ -46,7 +48,7 @@ def crear_ventana(secuencia, window_size):
     for i in range(window_size, len(secuencia) - window_size):
         context = secuencia[i-window_size:i] + secuencia[i+1 : i+1+window_size] # palabras antes de la palabra objetivo + palabras
         #después de la palabra objetivo
-        target = secuencias[i] # palabra objetivo
+        target = secuencia[i] # palabra objetivo
         inputs.append(context)
         outputs.append(target)
 
@@ -59,10 +61,10 @@ def crear_ventana(secuencia, window_size):
 #recordar que el primer modelo se basa en predecir la palabra en función del contexto, utilizamos 
 #tf.keras.Sequential para crear el modelo, también podríamos tf.keras.Model, pero en este caso es más sencillo
 #y más legible, ya que no necesitamos crear un modelo funcional con entradas y salidas separadas. Sino que un modelo secuencial
-def crear_modelo_I(neurons, vocab_size, embedding_size, window_size):
+def crear_modelo_I(n, vocab_size, embedding_size, window_size):
     """
     Esta función crea el modelo I para predecir la palabra objetivo a partir del contexto.
-    neurons - número de neuronas en la capa oculta
+    n - número de neuronas en la capa oculta
     vocab_size - tamaño del vocabulario (número de palabras únicas)
     embedding_size - tamaño del vector de embedding
     window_size - tamaño de la ventana de contexto
@@ -71,7 +73,7 @@ def crear_modelo_I(neurons, vocab_size, embedding_size, window_size):
         tf.keras.Input(shape=(window_size-1,), name='input_layer'), # -1 porque la palabra objetivo no se incluye en el contexto
         tf.keras.layers.Embedding(input_dim=vocab_size, output_dim=embedding_size,name='embedding_layer'), #capa de embedding, 
         #donde input_dim es el tamaño del vocabulario y output_dim es el tamaño del vector de embedding
-        tf.keras.layers.Dense(units=neurons, activation='relu', name='dense_layer_0'), # Capa oculta densa aplicada a cada embedding 
+        tf.keras.layers.Dense(units=n, activation='relu', name='dense_layer_0'), # Capa oculta densa aplicada a cada embedding 
         # del contexto, con dimensión "neurons"
         tf.keras.layers.Lambda(lambda x: tf.reduce_mean(x, axis = 1), name='average_layer'), # Se promedian los embeddings del 
         # contexto para obtener una sola representación combinada
@@ -85,7 +87,7 @@ def crear_modelo_I(neurons, vocab_size, embedding_size, window_size):
 
 #esta va a ser una función para probar distintas combinaciones de hiperparámetros, y elegir la mejor combinación según su rendimiento 
 # en el conjunto de validación. 
-def comprobar_modelo_I(secuencias, vocab_size, window_size, neurons, embedding_size ):
+def comprobar_modelo_I(secuencias, vocab_size, window_sizes, neurons, embedding_sizes ):
     """
     Esta función entrena el modelo I y devuelve la precisión en el conjunto de validación. Posteriormente almacena y ordena
     los resultados y devuelve la mejor configuración de hiperparámetros.
@@ -99,22 +101,22 @@ def comprobar_modelo_I(secuencias, vocab_size, window_size, neurons, embedding_s
     results = [] # lista para almacenar los resultados de cada combinación de hiperparámetros
 
     #pruebo con todas las combinaciones de hiperparámetros posibles
-    for window_size in window_size: 
+    for window_size in window_sizes: 
         inputs, outputs = crear_ventana(secuencias, window_size) #crear las ventanas de contexto
-        for neurons in neurons:
-            for embedding_size in embedding_size:
+        for n in neurons:
+            for embedding_size in embedding_sizes:
                 # la tarea de crear el modelo se vuelve trivial al haber definido la función crear_modelo_I
-                modelo = crear_modelo_I(neurons, vocab_size, embedding_size, window_size) #crear el modelo
+                modelo = crear_modelo_I(n, vocab_size, embedding_size, window_size) #crear el modelo
                 
                 #entrenar el modelo, utilizamos un valor de batch bastante grande para acelerar el entrenamiento
-                history = modelo.fit(inputs, outputs, epochs=100, batch_size=1024, validation_split=0.1, verbose=False) 
+                history = modelo.fit(inputs, outputs, epochs=100, batch_size=1024, validation_split=0.1, verbose=False)  #bajo las epochs a 50 para que no tarde tanto tiempo
 
                 #recuperar el valor de accuracy del objeto history devuelto por el método fit 
                 val_accuracy = history.history['val_accuracy'][-1] #último valor de accuracy en el conjunto de validación
 
                 #almaceno los valores en la lista results
                 results.append({
-                    'neurons': neurons,
+                    'n': n,
                     'embedding_size': embedding_size,
                     'window_size': window_size,
                     'val_accuracy': val_accuracy
@@ -125,9 +127,9 @@ def comprobar_modelo_I(secuencias, vocab_size, window_size, neurons, embedding_s
 
     #crear una tabla para mostrar los resultados
     tabla = PrettyTable()
-    tabla.field_names = ['Model','neurons', 'embedding_size', 'window_size', 'val_accuracy']
+    tabla.field_names = ['Model','n', 'embedding_size', 'window_size', 'val_accuracy']
     for i, result in enumerate(results):
-        tabla.add_row([f'Model {i+1}', result['neurons'], result['embedding_size'], result['window_size'], result['val_accuracy']])
+        tabla.add_row([f'Model {i+1}', result['n'], result['embedding_size'], result['window_size'], result['val_accuracy']])
     print(tabla)
     #devolver la mejor configuración de hiperparámetros
     mejor_configuracion = results[0]
@@ -274,28 +276,6 @@ def calcular_similitud_coseno(words, word_index, embeddings, titulo):
 
 
 
-
-
-
-
-
-###MAÑANA REVISAR CARTESIAN_PRODUCT Y METER CREAR_MODELO_2 Y YA PONERNOS CON EL IPYNB
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # Función que genera pares (target, contexto) positivos y negativos para entrenamiento 
 def cartesian_product(sequences):
     # Tamaño de la ventana de contexto: 5 // 2 = 2 (contexto a izquierda y derecha)
@@ -328,3 +308,30 @@ def cartesian_product(sequences):
 
     # Convertir las listas a arrays de NumPy y devolverlas
     return np.array(input_pairs), np.array(output)
+
+
+#A diferencia del modelo I, en este modelo nos hemos decantado por usar el modelo funcional de keras
+
+def crear_modelo_II(vocab_size, embedding_size):
+
+    input_layer1 = tf.keras.Input(shape=(1,), name='input_layer1')
+    input_layer2 = tf.keras.Input(shape=(1,), name='input_layer2')
+
+    embedding_layer1 = tf.keras.layers.Embedding(input_dim=vocab_size, output_dim=embedding_size, name='embedding_layer1')
+
+    embedding1 = embedding_layer1(input_layer1)
+    embedding2 = embedding_layer1(input_layer2)
+
+    dot_product = tf.keras.layers.Dot(axes=2)([embedding1, embedding2])
+
+    flatten = tf.keras.layers.Flatten()(dot_product)
+
+    output_layer = tf.keras.layers.Dense(1, activation='sigmoid')(flatten)
+
+    model = tf.keras.Model(inputs=[input_layer1, input_layer2], outputs=output_layer)
+
+    model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+
+    return model
+
+
